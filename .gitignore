@@ -1,3 +1,9 @@
+# Node dependencies
+node_modules/
+
+# Local environment variables (Contains secrets like MongoDB URI!)
+.env
+
 # System files
 .DS_Store
 Thumbs.db

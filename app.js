@@ -1,4 +1,4 @@
-// Client-Side RAG Chat System Logic with Conversational Brain Architecture
+// Client-Side RAG Chat System Logic with Full-Stack MongoDB Backend Connection
 
 let activeFiles = new Set();
 let messageHistory = [];
@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initApp();
 });
 
-// Safe localStorage helpers
+// Safe localStorage helper for Gemini API Key (Client-side specific)
 function getApiKey() {
     try {
         return localStorage.getItem("gemini_api_key") || "";
@@ -24,20 +24,45 @@ function setApiKey(val) {
     }
 }
 
-function loadHistory() {
+// Backend API communication helpers
+async function loadHistoryFromServer() {
     try {
-        const stored = localStorage.getItem("chat_history");
-        return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-        return [];
+        const res = await fetch('/api/history');
+        const data = await res.json();
+        if (data.success) {
+            messageHistory = data.history;
+        } else {
+            messageHistory = [];
+        }
+    } catch (err) {
+        console.error("Error loading chat history from MongoDB:", err);
+        messageHistory = [];
+    }
+    renderAllMessages();
+}
+
+async function saveMessageToServer(role, text, source = null) {
+    const msgObj = {
+        role: role,
+        parts: [{ text: text }],
+        source: source
+    };
+    try {
+        await fetch('/api/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(msgObj)
+        });
+    } catch (err) {
+        console.error("Error saving message to MongoDB database:", err);
     }
 }
 
-function saveHistory(history) {
+async function clearHistoryOnServer() {
     try {
-        localStorage.setItem("chat_history", JSON.stringify(history));
-    } catch (e) {
-        console.warn("localStorage is disabled or blocked in this context:", e);
+        await fetch('/api/clear', { method: 'POST' });
+    } catch (err) {
+        console.error("Error clearing database history:", err);
     }
 }
 
@@ -96,16 +121,15 @@ function initApp() {
         setApiKey(val);
     });
 
-    // Load message history from local storage
-    messageHistory = loadHistory();
-    renderAllMessages();
+    // Load message history from MongoDB Cloud server
+    loadHistoryFromServer();
 }
 
 // Clear chat history
-function clearChatHistory() {
-    if (confirm("Are you sure you want to clear the conversation history?")) {
+async function clearChatHistory() {
+    if (confirm("Are you sure you want to clear the conversation history? This will erase it from the MongoDB Cloud Database!")) {
+        await clearHistoryOnServer();
         messageHistory = [];
-        saveHistory(messageHistory);
         renderAllMessages();
     }
 }
@@ -117,7 +141,7 @@ function renderAllMessages() {
 
     if (messageHistory.length === 0) {
         // Initial Bot Greeting
-        addMessageUI("bot", "Hello! I am your Project AI Brain. I have read and loaded all 26 markdown files (Grammar, Spoken English, Pathology, Treatments, Abuse Guidelines, Emotions/Feelings, and AI theory) into my active memory. Ask me anything about these files or just chat with me!");
+        addMessageUI("bot", "Hello! I am your Project AI Brain. I am connected to a cloud MongoDB Database! All our conversation logs are securely stored there. Ask me anything about the loaded documents or just chat!");
     } else {
         messageHistory.forEach(msg => {
             const sender = msg.role === 'user' ? 'user' : 'bot';
@@ -156,7 +180,7 @@ async function sendMessage() {
     // Display user message
     addMessageUI("user", query);
     messageHistory.push({ role: "user", parts: [{ text: query }] });
-    saveHistory(messageHistory);
+    await saveMessageToServer("user", query);
     
     inputEl.value = "";
 
@@ -165,13 +189,13 @@ async function sendMessage() {
 
     try {
         const response = await generateAIResponse(query);
-        // Save bot response to history
+        // Save bot response to server
+        await saveMessageToServer("model", response.text, response.source);
         messageHistory.push({ 
             role: "model", 
             parts: [{ text: response.text }],
             source: response.source 
         });
-        saveHistory(messageHistory);
 
         updateBotMessage(typingId, response.text, response.source);
     } catch (err) {
@@ -293,7 +317,6 @@ Here is the context from the local project files (only use if the user asks a re
 ${contextStr}`;
 
         // Prepare api payload with systemInstruction and contents history
-        // Strip source metadata from history elements for API payload
         const apiContents = messageHistory.map(item => ({
             role: item.role,
             parts: item.parts
