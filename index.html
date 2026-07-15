@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Knowledge AI Chat Hub</title>
+    <!-- Outfit Font from Google Fonts for a Premium Typographic Feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- Left Sidebar: Memory Controller & Files List -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>Antigravity Brain</h1>
+                <p>Knowledge Base & Active Memory Controller</p>
+            </div>
+            
+            <div class="files-list-container" id="filesList">
+                <!-- Populated dynamically via app.js -->
+                <div style="padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading project files database...
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Chat Interface -->
+        <div class="chat-panel">
+            
+            <!-- Chat Panel Header (API Configurations) -->
+            <div class="chat-header">
+                <div class="header-info">
+                    <h2 style="font-size: 1.1rem; font-weight: 700;">Live RAG Session Chat</h2>
+                    <p style="font-size: 0.75rem; color: var(--text-muted);">AI is searching across selected active files</p>
+                </div>
+                
+                <div class="api-settings">
+                    <input type="password" id="apiKeyInput" class="api-input" placeholder="Enter Gemini API Key (Optional)...">
+                    <button class="api-toggle" onclick="alert('API Key is automatically saved to LocalStorage for live RAG sessions!')">API Key Info</button>
+                    <button class="api-toggle" style="border-color: rgba(239, 68, 68, 0.4); color: #f87171;" id="clearBtn">Clear Chat</button>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="messages-box" id="messagesBox">
+                <!-- Messages populated dynamically -->
+            </div>
+
+            <!-- Input Bar -->
+            <div class="input-area">
+                <div class="input-container">
+                    <input type="text" id="chatInput" class="chat-input" placeholder="Ask anything about the project files (e.g. malaria treatment, tapori slangs, AI safety)...">
+                    <button id="sendBtn" class="send-btn">Send Query</button>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="index_data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
