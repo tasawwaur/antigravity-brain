@@ -251,8 +251,102 @@ function updateBotMessage(msgId, text, source = null) {
 // RAG Retrieval & Generation Logic
 async function generateAIResponse(query) {
     const message = query.trim();
+    const msgLower = message.toLowerCase();
 
-    // 1. Search across active index files (Knowledge Engine)
+    // ==========================================
+    // STEP 1-5: INTENT & EMOTION DETECTOR (Think first!)
+    // ==========================================
+
+    let isCasualChat = false;
+    let casualReply = "";
+
+    // A. Greetings / Hey (Checks common variations)
+    const greetings = ["hi", "hii", "hiii", "hello", "hey", "yo", "namaste", "suno", "hey there"];
+    if (greetings.includes(msgLower)) {
+        isCasualChat = true;
+        casualReply = "Hello 😊\nHow are you?";
+    }
+
+    // B. Casual Chat / "Kaise ho" / "Kya haal hai"
+    const statusQueries = [
+        "kya haal hai", "kya hal hai", "kaise ho", "kaise ho bhai", "kaise ho tum", "kaise hain", 
+        "aap kaise ho", "sab thik", "sab badhiya", "kaisa chal raha hai"
+    ];
+    if (statusQueries.some(q => msgLower.includes(q)) || msgLower === "haal chaal") {
+        isCasualChat = true;
+        casualReply = "Sab badhiya 😄\nTum batao, kya chal raha hai?";
+    }
+
+    // C. "Kya kar rahe ho" / "Kya chal raha hai"
+    const actionQueries = [
+        "kya kar rahe ho", "kya kar rhe ho", "kyaa kr rhe ho", "kya kr rhe ho", 
+        "kya kar rahe", "kya kar rhe", "kyaa kr rhe", "kya chal raha hai", "kya chal rha hai"
+    ];
+    if (actionQueries.some(q => msgLower.includes(q))) {
+        isCasualChat = true;
+        casualReply = "Tumse baat kar raha hoon 😄\nAur tum kya kar rahe ho?";
+    }
+
+    // D. "Aur batao" / "Aur bhai"
+    if (msgLower === "aur batao" || msgLower === "aur sunao" || msgLower === "aur bhai" || msgLower === "aur batao bhai") {
+        isCasualChat = true;
+        casualReply = "Bas mast 😄\nTum sunao.";
+    }
+
+    // E. Emotion Detector (Sadness, Mood off)
+    let hasEmpathyTrigger = false;
+    let empathyReply = "";
+    const sadKeywords = ["mood off", "mood kharab", "sad hoon", "dukh", "sad", "udhas", "depression", "pareshan"];
+    if (sadKeywords.some(kw => msgLower.includes(kw))) {
+        hasEmpathyTrigger = true;
+        empathyReply = "Oh no... 🥺 Mujhe sun kar bohot bura laga. Kya hua bhai? Kuch share karna chahte ho? Main yahan hoon tumhari baat sunne ke liye. Pareshan mat ho, sab theek ho jayega. ❤️";
+    }
+
+    const angryKeywords = ["angry", "gussa", "irritated", "dimag kharab"];
+    if (angryKeywords.some(kw => msgLower.includes(kw))) {
+        hasEmpathyTrigger = true;
+        empathyReply = "Arey shant ho jao mere dost... 🥺 Kya baat ho gayi? Kisne gussa dilaya? Thoda deep breath lo, main tumhari poori baat sunne ke liye ready hoon.";
+    }
+
+    // F. Context Memory Check ("Kal hum kya baat kar rahe the")
+    let hasMemoryTrigger = false;
+    let memoryReply = "";
+    const memoryKeywords = ["kal hum", "kya baat kar rahe the", "purani baat", "history", "prev", "pehle kya"];
+    if (memoryKeywords.some(kw => msgLower.includes(kw))) {
+        hasMemoryTrigger = true;
+        const exchanges = [];
+        for (let i = 0; i < messageHistory.length - 1; i++) {
+            const role = messageHistory[i].role === 'user' ? 'Aap' : 'Main';
+            exchanges.push(`${role}: "${messageHistory[i].parts[0].text}"`);
+        }
+        if (exchanges.length > 0) {
+            const summary = exchanges.slice(-4).join("\n");
+            memoryReply = `Hum pehle ye baatein kar rahe the:\n\n${summary}\n\nAur batao, ab aage kis topic pe discuss karein? 😄`;
+        } else {
+            memoryReply = "Abhi hamari chat history me koi purani baat nahi mili. Chalo ek naye topic se shuru karte hain! 😄";
+        }
+    }
+
+    // ==========================================
+    // ROUTING ACCORDING TO THINKING ENGINE RULES
+    // ==========================================
+
+    // 1. Emotion triggers have highest priority (Empathy first)
+    if (hasEmpathyTrigger) {
+        return { text: empathyReply, source: null };
+    }
+
+    // 2. Memory triggers have second priority
+    if (hasMemoryTrigger) {
+        return { text: memoryReply, source: null };
+    }
+
+    // 3. Casual chat replies (Do NOT search files if it's casual chat)
+    if (isCasualChat) {
+        return { text: casualReply, source: null };
+    }
+
+    // 4. Knowledge Engine (Only run RAG if it's a real query requiring documents)
     let bestMatch = null;
     let maxScore = 0;
 
@@ -264,6 +358,7 @@ async function generateAIResponse(query) {
                 let score = 0;
                 queryTokens.forEach(token => {
                     if (token.length < 3) return;
+                    // Exact keyword check yields higher score
                     if (chapter.keywords.includes(token)) score += 10;
                     if (chapter.title.toLowerCase().includes(token)) score += 5;
                     if (chapter.content.toLowerCase().includes(token)) score += 1;
@@ -292,7 +387,7 @@ async function generateAIResponse(query) {
 
     if (apiKey && apiKey.length > 5) {
         // CALL REAL GEMINI API (RAG MODE) WITH FULL SYSTEM INSTRUCTIONS AND CHAT HISTORY
-        const contextStr = (bestMatch && maxScore >= 5)
+        const contextStr = (bestMatch && maxScore >= 8)
             ? `Context from file [${bestMatch.title}] (Chapter: ${bestMatch.chapter}):\n${bestMatch.content}`
             : "No specific local files context found.";
 
@@ -341,7 +436,7 @@ ${contextStr}`;
                 const textResponse = data.candidates[0].content.parts[0].text;
                 return {
                     text: textResponse,
-                    source: (bestMatch && maxScore >= 5) ? { name: bestMatch.title, path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${bestMatch.fileName}` } : null
+                    source: (bestMatch && maxScore >= 8) ? { name: bestMatch.title, path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${bestMatch.fileName}` } : null
                 };
             }
         } catch (e) {
@@ -349,81 +444,8 @@ ${contextStr}`;
         }
     }
 
-    // LOCAL OFFLINE AGENT FALLBACK (Brain Engine simulation)
-    // Run rule-based processing according to the steps
-
-    const msgLower = message.toLowerCase().trim();
-
-    // 1. Emotion Detector & Empathy Responder
-    if (msgLower.includes("mood off") || msgLower.includes("mood kharab") || msgLower.includes("sad hoon") || msgLower.includes("dukh") || msgLower.includes("sad") || msgLower.includes("udhas")) {
-        return {
-            text: "Oh no... 🥺 Mujhe sun kar bohot bura laga. Kya hua bhai? Kuch share karna chahte ho? Main yahan hoon tumhari baat sunne ke liye. Pareshan mat ho, sab theek ho jayega. ❤️",
-            source: null
-        };
-    }
-
-    if (msgLower.includes("angry") || msgLower.includes("gussa") || msgLower.includes("irritated")) {
-        return {
-            text: "Arey shant ho jao mere dost... 🥺 Kya baat ho gayi? Kisne gussa dilaya? Thoda deep breath lo, main tumhari poori baat sunne ke liye ready hoon.",
-            source: null
-        };
-    }
-
-    // 2. Context Memory Check ("Kal hum kya baat kar rahe the" or "previous conversation")
-    if (msgLower.includes("kal hum") || msgLower.includes("kya baat kar rahe the") || msgLower.includes("purani baat") || msgLower.includes("history") || msgLower.includes("prev")) {
-        // Find previous exchanges excluding the very last user prompt
-        const exchanges = [];
-        for (let i = 0; i < messageHistory.length - 1; i++) {
-            const role = messageHistory[i].role === 'user' ? 'Aap' : 'Main';
-            exchanges.push(`${role}: "${messageHistory[i].parts[0].text}"`);
-        }
-        
-        if (exchanges.length > 0) {
-            // Return summary of last 2-3 exchanges
-            const summary = exchanges.slice(-4).join("\n");
-            return {
-                text: `Hum pehle ye baatein kar rahe the:\n\n${summary}\n\nAur batao, ab aage kis topic pe discuss karein? 😄`,
-                source: null
-            };
-        } else {
-            return {
-                text: "Abhi hamari chat history me koi purani baat nahi mili. Chalo ek naye topic se shuru karte hain! 😄",
-                source: null
-            };
-        }
-    }
-
-    // 3. Casual Conversation Router (Step 6 examples)
-    if (msgLower === "hi" || msgLower === "hii" || msgLower === "hello" || msgLower === "hey" || msgLower === "yo") {
-        return {
-            text: "Hello 😊\nHow are you?",
-            source: null
-        };
-    }
-
-    if (msgLower.includes("kya haal hai") || msgLower.includes("kaise ho") || msgLower.includes("kaise hain")) {
-        return {
-            text: "Sab badhiya 😄\nTum batao, kya chal raha hai?",
-            source: null
-        };
-    }
-
-    if (msgLower === "aur bhai" || msgLower === "aur batao") {
-        return {
-            text: "Bas mast 😄\nTum sunao.",
-            source: null
-        };
-    }
-
-    if (msgLower.includes("kya kar rahe ho") || msgLower.includes("kya kar rhe ho")) {
-        return {
-            text: "Tumse baat kar raha hoon 😄\nAur tum kya kar rahe ho?",
-            source: null
-        };
-    }
-
-    // 4. Knowledge Engine (RAG match)
-    if (bestMatch && maxScore >= 5) {
+    // LOCAL OFFLINE AGENT FALLBACK (RAG Match - only if maxScore is high enough)
+    if (bestMatch && maxScore >= 8) {
         let explanation = `Based on the matching entry in my active memory **[${bestMatch.title}]** (Chapter: *${bestMatch.chapter}*):\n\n`;
         explanation += `${bestMatch.content}`;
         return {
