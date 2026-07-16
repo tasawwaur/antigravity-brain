@@ -221,7 +221,15 @@ function addMessageUI(sender, text, isTemp = false, source = null) {
     `;
 
     if (source) {
-        html += `<div class="source-ref">Source: <a href="file:///${source.path}" target="_blank">${source.name}</a></div>`;
+        if (Array.isArray(source)) {
+            html += `<div class="source-ref">Sources: `;
+            source.forEach((src, idx) => {
+                html += `${idx > 0 ? ', ' : ''}<a href="file:///${src.path}" target="_blank">📄 ${src.name}</a>`;
+            });
+            html += `</div>`;
+        } else {
+            html += `<div class="source-ref">Source: <a href="file:///${source.path}" target="_blank">${source.name}</a></div>`;
+        }
     }
 
     msg.innerHTML = html;
@@ -240,7 +248,15 @@ function updateBotMessage(msgId, text, source = null) {
     `;
 
     if (source) {
-        html += `<div class="source-ref">Source: <a href="file:///${source.path}" target="_blank">${source.name}</a></div>`;
+        if (Array.isArray(source)) {
+            html += `<div class="source-ref">Sources: `;
+            source.forEach((src, idx) => {
+                html += `${idx > 0 ? ', ' : ''}<a href="file:///${src.path}" target="_blank">📄 ${src.name}</a>`;
+            });
+            html += `</div>`;
+        } else {
+            html += `<div class="source-ref">Source: <a href="file:///${source.path}" target="_blank">${source.name}</a></div>`;
+        }
     }
 
     msg.innerHTML = html;
@@ -347,35 +363,37 @@ async function generateAIResponse(query) {
     }
 
     // 4. Knowledge Engine (Only run RAG if it's a real query requiring documents)
-    let bestMatch = null;
-    let maxScore = 0;
+    let matches = [];
 
     if (typeof KNOWLEDGE_INDEX !== 'undefined') {
-        const queryTokens = message.toLowerCase().split(/\s+/);
+        const queryTokens = message.toLowerCase().split(/\s+/).filter(t => t.length >= 3);
         activeFiles.forEach(fileName => {
             const fileData = KNOWLEDGE_INDEX[fileName];
             fileData.chapters.forEach(chapter => {
                 let score = 0;
                 queryTokens.forEach(token => {
-                    if (token.length < 3) return;
-                    // Exact keyword check yields higher score
-                    if (chapter.keywords.includes(token)) score += 10;
-                    if (chapter.title.toLowerCase().includes(token)) score += 5;
-                    if (chapter.content.toLowerCase().includes(token)) score += 1;
+                    if (chapter.keywords.includes(token)) score += 12;
+                    if (chapter.title.toLowerCase().includes(token)) score += 6;
+                    if (chapter.content.toLowerCase().includes(token)) score += 2;
                 });
 
-                if (score > maxScore) {
-                    maxScore = score;
-                    bestMatch = {
+                if (score > 0) {
+                    matches.push({
+                        score: score,
                         fileName: fileName,
-                        title: fileData.title,
-                        chapter: chapter.title,
+                        fileTitle: fileData.title,
+                        chapterTitle: chapter.title,
                         content: chapter.content
-                    };
+                    });
                 }
             });
         });
     }
+
+    // Sort matches descending by relevance score
+    matches.sort((a, b) => b.score - a.score);
+    const topMatches = matches.slice(0, 4);
+    const hasGoodMatch = topMatches.length > 0 && topMatches[0].score >= 8;
 
     // Check for Gemini API key
     let apiKey = "";
@@ -387,28 +405,21 @@ async function generateAIResponse(query) {
 
     if (apiKey && apiKey.length > 5) {
         // CALL REAL GEMINI API (RAG MODE) WITH FULL SYSTEM INSTRUCTIONS AND CHAT HISTORY
-        const contextStr = (bestMatch && maxScore >= 8)
-            ? `Context from file [${bestMatch.title}] (Chapter: ${bestMatch.chapter}):\n${bestMatch.content}`
+        const contextStr = hasGoodMatch
+            ? topMatches.map((m, idx) => `[Document ${idx+1}] File: "${m.fileTitle}" (Chapter: "${m.chapterTitle}")\nContent:\n${m.content}`).join("\n\n---\n\n")
             : "No specific local files context found.";
 
         const systemInstructionText = `You are AI Brain.
-Your first responsibility is to understand the user.
-Never behave like a keyword search engine.
-Never reply after reading only one matching sentence.
+Your first responsibility is to read the compiled local project files context below and answer the user's question directly based ONLY on this context.
 
-For every user message execute this internal thinking process:
-STEP 1: Read the user's complete message. Understand what the user actually wants.
-STEP 2: Determine the intent (Greeting, Casual Chat, Question, Request, Help, Story, Opinion, Coding, Medical, Education, Math, Programming, General/Personal Conversation, Joke, Emotion, Problem).
-STEP 3: Understand the emotion (Happy, Angry, Sad, Excited, Confused, Funny, Neutral).
-STEP 4: Read conversation history. Understand what both people were talking about. Never ignore previous messages.
-STEP 5: Think. Before writing any answer, ask yourself: What is the user actually asking? Is this a greeting? Is this only casual conversation? Does this require memory? Does this require knowledge? Can I answer naturally?
-STEP 6: If it is casual conversation, DO NOT search documents, DO NOT search files, DO NOT return random information. Reply naturally like a human.
-STEP 7: Only when the user asks a real question should you use your knowledge.
-STEP 8: Always answer naturally. Never sound robotic. Never say "I couldn't find a matching document" or expose internal search.
-STEP 9: If the answer is unknown, say "I don't know for sure, but based on what I understand..."
-STEP 10: Talk like a real intelligent friend. Be helpful. Be natural. Remember previous conversation and continue naturally without breaking the flow.
+DIRECTIONS:
+1. Search all provided [Document X] sources, compare the translation files (English, Hindi, Hinglish), extract the exact meaning/grammatical rules/words, and provide the answer.
+2. Be highly specific and concise. Directly answer what is asked. Do not guess or add unrelated general knowledge if the context provides the facts.
+3. Be conversational and natural, utilizing the user's input language (Hindi, English, or Hinglish) to reply.
+4. If the user asks a casual question (like "hi", "how are you", "kya kar rahe ho"), do not refer to the documents. Respond naturally as a helpful friend.
+5. Never output meta-data, raw queries, or technical errors (such as "no matches found in active memory").
 
-Here is the context from the local project files (only use if the user asks a real question requiring this knowledge):
+Here is the context from the local active memory files:
 ${contextStr}`;
 
         // Prepare api payload with systemInstruction and contents history
@@ -434,9 +445,23 @@ ${contextStr}`;
             const data = await res.json();
             if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0]) {
                 const textResponse = data.candidates[0].content.parts[0].text;
+                
+                // Deduplicate source file paths
+                const uniqueSources = [];
+                const seenFiles = new Set();
+                topMatches.forEach(m => {
+                    if (!seenFiles.has(m.fileName)) {
+                        seenFiles.add(m.fileName);
+                        uniqueSources.push({
+                            name: m.fileTitle,
+                            path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${m.fileName}`
+                        });
+                    }
+                });
+
                 return {
                     text: textResponse,
-                    source: (bestMatch && maxScore >= 8) ? { name: bestMatch.title, path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${bestMatch.fileName}` } : null
+                    source: hasGoodMatch ? uniqueSources : null
                 };
             }
         } catch (e) {
@@ -444,17 +469,32 @@ ${contextStr}`;
         }
     }
 
-    // LOCAL OFFLINE AGENT FALLBACK (RAG Match - only if maxScore is high enough)
-    if (bestMatch && maxScore >= 8) {
-        let explanation = `Based on the matching entry in my active memory **[${bestMatch.title}]** (Chapter: *${bestMatch.chapter}*):\n\n`;
-        explanation += `${bestMatch.content}`;
+    // LOCAL OFFLINE AGENT FALLBACK (RAG Match - compile all matches)
+    if (hasGoodMatch) {
+        let explanation = `Based on the matching entries in my active memory:\n\n`;
+        topMatches.forEach(m => {
+            explanation += `📁 **[${m.fileTitle}]** (Chapter: *${m.chapterTitle}*):\n${m.content}\n\n---\n\n`;
+        });
+
+        const uniqueSources = [];
+        const seenFiles = new Set();
+        topMatches.forEach(m => {
+            if (!seenFiles.has(m.fileName)) {
+                seenFiles.add(m.fileName);
+                uniqueSources.push({
+                    name: m.fileTitle,
+                    path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${m.fileName}`
+                });
+            }
+        });
+
         return {
             text: explanation,
-            source: { name: bestMatch.title, path: `C:/Users/DELL/.gemini/antigravity/scratch/project.md/${bestMatch.fileName}` }
+            source: uniqueSources
         };
     }
 
-    // 5. Default natural offline response if no match
+    // 5. Default natural response if no match found
     return {
         text: "I don't know for sure, but based on what I understand, iske baare mein meri active local memory me specific documentation nahi mila. Agar aap kisi specific topic (jaise grammar, disease treatments, emotions) ke baare me pooch rahe hain, toh thoda detail me likhein! 😊",
         source: null
@@ -470,3 +510,4 @@ function formatMarkdown(text) {
         .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\n/g, '<br>');
 }
+
