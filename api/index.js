@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Serve static frontend files
-app.use(express.static(path.join(__dirname)));
+// Serve static frontend files (one level up from /api folder)
+app.use(express.static(path.join(__dirname, '..')));
 
 // MongoDB Connection with Graceful Fallback
 let isConnected = false;
@@ -105,10 +105,14 @@ app.post('/api/clear', async (req, res) => {
     }
 });
 
-// Start Server
-app.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 Antigravity Brain Server is running on http://localhost:${PORT}`);
-    console.log(`   Frontend is live at http://localhost:${PORT}`);
-    console.log(`=======================================================`);
-});
+// Start Server (only locally, not on Vercel)
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`=======================================================`);
+        console.log(`🚀 Antigravity Brain Server is running on http://localhost:${PORT}`);
+        console.log(`   Frontend is live at http://localhost:${PORT}`);
+        console.log(`=======================================================`);
+    });
+}
+
+module.exports = app;

@@ -14,3 +14,5 @@ Thumbs.db
 # Windows temporary files
 *~
 ~$*
+
+.vercel
